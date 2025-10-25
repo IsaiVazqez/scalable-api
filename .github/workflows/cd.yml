@@ -1,11 +1,13 @@
 name: cd
 
 on:
-  push:
-    branches: [ main ]
+  workflow_run:
+    workflows: ["ci"]        # corre solo cuando el workflow "ci" termine
+    types: [completed]
 
 jobs:
   deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: 🚀 Deploy to EC2
@@ -16,19 +18,17 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             set -e
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            echo ">>> Deploying scalable-api $SHA"
 
-            echo ">>> Deploying scalable-api ${{ github.sha }}"
-
-            # Crear o actualizar el directorio de la app
             sudo mkdir -p /opt/scalable && sudo chown $USER:$USER /opt/scalable
             cd /opt/scalable
 
-            # Crear archivo docker-compose con la imagen del commit actual
-            cat > docker-compose.prod.yml <<'YAML'
-            version: "3.9"
+            # compose sin 'version:' (ya es obsoleto)
+            cat > docker-compose.prod.yml <<YAML
             services:
               api:
-                image: ghcr.io/isaivazqez/scalable-api:${{ github.sha }}
+                image: ghcr.io/isaivazqez/scalable-api:${SHA}
                 pull_policy: always
                 container_name: scalable_api
                 restart: unless-stopped
@@ -38,13 +38,18 @@ jobs:
                   - "80:8080"
             YAML
 
-            # Login a GHCR
+            # login a GHCR con tu PAT guardado como 'TOKEN'
             echo "${{ secrets.TOKEN }}" | docker login ghcr.io -u isaivazqez --password-stdin
 
-            # Pull y arranque
-            docker compose -f docker-compose.prod.yml pull
-            docker compose -f docker-compose.prod.yml up -d
+            # retry para evitar latencias de propagación en GHCR
+            for i in {1..10}; do
+              docker pull ghcr.io/isaivazqez/scalable-api:${SHA} && break || {
+                echo "Imagen aún no disponible, reintentando ($i/10)..."
+                sleep 6
+              }
+            done
 
+            docker compose -f docker-compose.prod.yml up -d
             echo ">>> Healthcheck"
             curl -fsS -X POST http://localhost/graphql \
               -H "Content-Type: application/json" \
