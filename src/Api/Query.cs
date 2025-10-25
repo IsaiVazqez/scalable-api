@@ -2,7 +2,7 @@ namespace Api;
 
 public class Query
 {
-    public string Ping() => "pong from updated version 🚀";
+    public string Ping() => "pong from updated versionpong 🚀";
     
     public string GetTimestamp() => DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss UTC");
     
