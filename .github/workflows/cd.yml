@@ -2,7 +2,7 @@ name: cd
 
 on:
   workflow_run:
-    workflows: ["ci"]        # corre solo cuando el workflow "ci" termine
+    workflows: ["ci"]         # corre solo cuando "ci" termine
     types: [completed]
 
 jobs:
@@ -24,7 +24,7 @@ jobs:
             sudo mkdir -p /opt/scalable && sudo chown $USER:$USER /opt/scalable
             cd /opt/scalable
 
-            # compose sin 'version:' (ya es obsoleto)
+            # Genera docker-compose (sin 'version:' porque es obsoleto)
             cat > docker-compose.prod.yml <<YAML
             services:
               api:
@@ -34,23 +34,38 @@ jobs:
                 restart: unless-stopped
                 environment:
                   ASPNETCORE_ENVIRONMENT: Production
+                  ASPNETCORE_URLS: http://+:8080
                 ports:
                   - "80:8080"
             YAML
 
-            # login a GHCR con tu PAT guardado como 'TOKEN'
+            # Login a GHCR con tu PAT guardado como secret "TOKEN"
             echo "${{ secrets.TOKEN }}" | docker login ghcr.io -u isaivazqez --password-stdin
 
-            # retry para evitar latencias de propagación en GHCR
+            # Pull con reintentos por posible latencia de propagación en GHCR
             for i in {1..10}; do
-              docker pull ghcr.io/isaivazqez/scalable-api:${SHA} && break || {
-                echo "Imagen aún no disponible, reintentando ($i/10)..."
-                sleep 6
-              }
+              if docker pull ghcr.io/isaivazqez/scalable-api:${SHA}; then
+                break
+              fi
+              echo "Imagen aún no disponible, reintentando ($i/10)..."
+              sleep 6
             done
 
+            # Arranque / recreación
             docker compose -f docker-compose.prod.yml up -d
-            echo ">>> Healthcheck"
-            curl -fsS -X POST http://localhost/graphql \
-              -H "Content-Type: application/json" \
-              -d '{"query":"{ ping }"}' || (echo "Healthcheck failed" && exit 1)
+
+            echo ">>> Healthcheck (con reintentos)"
+            for i in {1..30}; do
+              if curl -fsS -X POST http://localhost/graphql \
+                -H "Content-Type: application/json" \
+                -d '{"query":"{ ping }"}' > /dev/null; then
+                echo "OK: servicio responde."
+                exit 0
+              fi
+              echo "Aún no está listo, reintentando ($i/30)..."
+              sleep 2
+            done
+
+            echo "Healthcheck failed. Últimos logs del contenedor:"
+            docker logs --tail 200 scalable_api
+            exit 1
