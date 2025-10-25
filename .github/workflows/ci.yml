@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 env:
-  IMAGE_NAME: ghcr.io/IsaiVazqez/scalable-api
+  IMAGE_NAME: ghcr.io/isaivazqez/scalable-api   # 👈 todo minúsculas
 
 jobs:
   build-and-push:
@@ -20,8 +20,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: IsaiVazqez
-          password: ${{ secrets.TOKEN }}
+          username: ${{ github.actor }}          # o ponlo literal, pero no hace falta
+          password: ${{ secrets.GITHUB_TOKEN }}  # usa el token automático del workflow
 
       - name: Build & Push image
         uses: docker/build-push-action@v6
